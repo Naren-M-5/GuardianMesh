@@ -15,9 +15,9 @@ const text = (value: unknown, fallback = "Unknown"): string => typeof value === 
 const number = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
 
 export async function GET() {
-  const [healthResult, incidentsResult, eventsResult, devicesResult] = await Promise.allSettled([
+  const [healthResult, incidentsResult, eventsResult, devicesResult, syncResult] = await Promise.allSettled([
     apiGet("/api/v1/health"), apiGet("/api/v1/incidents?limit=25"), apiGet("/api/v1/events?limit=25"),
-    apiGet("/api/v1/integrations/ring/devices"),
+    apiGet("/api/v1/integrations/ring/devices"), apiGet("/api/v1/integrations/ring/sync/status"),
   ]);
   if (healthResult.status === "rejected") {
     return NextResponse.json({ error: "GuardianMesh API is offline", detail: "Start FastAPI on port 8000 and refresh." }, { status: 503 });
@@ -44,6 +44,7 @@ export async function GET() {
   }));
   // Deliberately discard raw Ring IDs and relationships before responding to the browser.
   const deviceNames = rawDevices.map((item) => text(object(item.attributes).name, "Ring device")).slice(0, 3);
+  const sync = syncResult.status === "fulfilled" ? syncResult.value : {};
   const highest = incidents.reduce<(typeof incidents)[number] | undefined>(
     (current, incident) => !current || incident.risk.score > current.risk.score ? incident : current, undefined,
   );
@@ -53,6 +54,11 @@ export async function GET() {
     ring: {
       online: devicesResult.status === "fulfilled", count: rawDevices.length, names: deviceNames,
       message: devicesResult.status === "fulfilled" ? "Connected securely" : "Token unavailable or expired — generate a fresh Playground token",
+      sync: {
+        status: text(sync.status, "never_synced"),
+        lastSyncedAt: typeof sync.last_synced_at === "string" ? sync.last_synced_at : null,
+        imported: number(sync.imported), duplicates: number(sync.duplicates),
+      },
     },
     risk: highest?.risk ?? { score: 0, level: "normal", evidence: [] }, primaryIncident: highest ?? null,
     incidents, events,

@@ -38,6 +38,9 @@ class Store:
           audit_id INTEGER PRIMARY KEY AUTOINCREMENT, occurred_at TEXT NOT NULL,
           actor TEXT NOT NULL, action TEXT NOT NULL, object_id TEXT, details_json TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS integration_state (
+          integration TEXT PRIMARY KEY, state_json TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
         """)
         self.connection.commit()
 
@@ -93,6 +96,20 @@ class Store:
             "SELECT * FROM incidents WHERE incident_id=?", (incident_id,)
         ).fetchone()
         return self._incident(row) if row else None
+
+    def set_integration_state(self, integration: str, state: dict[str, Any]) -> None:
+        updated_at = str(state.get("updated_at") or state.get("last_synced_at") or "")
+        self.connection.execute(
+            "INSERT OR REPLACE INTO integration_state VALUES (?, ?, ?)",
+            (integration, json.dumps(state), updated_at),
+        )
+        self.connection.commit()
+
+    def get_integration_state(self, integration: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT state_json FROM integration_state WHERE integration=?", (integration,)
+        ).fetchone()
+        return json.loads(row["state_json"]) if row else None
 
     @staticmethod
     def _incident(row: sqlite3.Row) -> dict[str, Any]:

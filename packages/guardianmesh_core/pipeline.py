@@ -1,7 +1,7 @@
 from typing import Any
 
 from .models import CanonicalEvent
-from .normalizer import normalize_ring
+from .normalizer import normalize_ring, normalize_ring_history
 from .risk import assess
 from .storage import Store
 
@@ -12,6 +12,13 @@ class GuardianPipeline:
 
     def ingest_ring(self, payload: dict[str, Any], signature_verified: bool) -> dict[str, Any]:
         event = normalize_ring(payload, signature_verified)
+        return self._persist(event)
+
+    def ingest_ring_history(self, record: dict[str, Any], device_id: str = "") -> dict[str, Any]:
+        event = normalize_ring_history(record, device_id)
+        return self._persist(event)
+
+    def _persist(self, event: CanonicalEvent) -> dict[str, Any]:
         persisted, created = self.store.add_event(event)
         if not created:
             return {"accepted": True, "duplicate": True, "event_id": persisted.event_id}

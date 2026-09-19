@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 
@@ -10,11 +11,24 @@ from packages.guardianmesh_core.signing import SignatureError, verify
 from packages.guardianmesh_core.storage import Store
 
 from .config import settings
-from .ring_client import RingApiError, list_devices as ring_list_devices
+from .ring_client import (
+    RingApiError,
+    list_device_events,
+    list_devices as ring_list_devices,
+)
 
 app = FastAPI(title="GuardianMesh API", version="0.1.0")
 store = Store(settings.db_path)
 pipeline = GuardianPipeline(store)
+
+
+def require_local(request: Request) -> None:
+    client_host = request.client.host if request.client else ""
+    if client_host not in {"127.0.0.1", "::1", "testclient"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Ring integration controls are available only from this laptop.",
+        )
 
 
 @app.get("/api/v1/health")
@@ -30,14 +44,12 @@ async def ring_webhook(
 ) -> dict:
     body = await request.body()
     signature_verified = False
-
     if not settings.allow_unsigned_simulator:
         try:
             verify(body, settings.webhook_secret, x_ring_timestamp, x_ring_signature)
             signature_verified = True
         except SignatureError as exc:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
-
     try:
         payload = json.loads(body)
         return pipeline.ingest_ring(payload, signature_verified)
@@ -48,20 +60,78 @@ async def ring_webhook(
 @app.get("/api/v1/integrations/ring/devices")
 def get_ring_devices(request: Request) -> dict:
     """Discover Ring devices using a token stored only in local .env."""
-    client_host = request.client.host if request.client else ""
-
-    if client_host not in {"127.0.0.1", "::1"}:
-        raise HTTPException(
-            status_code=403,
-            detail="Ring device discovery is available only from this laptop.",
-        )
-
+    require_local(request)
     try:
-        return ring_list_devices(
-            settings.ring_access_token,
-            settings.ring_api_base_url,
-        )
+        return ring_list_devices(settings.ring_access_token, settings.ring_api_base_url)
     except RingApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/integrations/ring/sync/status")
+def get_ring_sync_status(request: Request) -> dict:
+    require_local(request)
+    return store.get_integration_state("ring") or {
+        "status": "never_synced",
+        "last_synced_at": None,
+        "fetched": 0,
+        "imported": 0,
+        "duplicates": 0,
+    }
+
+
+@app.post("/api/v1/integrations/ring/sync")
+def sync_ring_events(request: Request) -> dict:
+    """Import the newest Ring history page for every authorized device."""
+    require_local(request)
+    try:
+        devices_payload = ring_list_devices(
+            settings.ring_access_token, settings.ring_api_base_url
+        )
+        devices = devices_payload.get("data") or []
+        fetched = imported = duplicates = skipped = 0
+        for device in devices:
+            if not isinstance(device, dict):
+                skipped += 1
+                continue
+            device_id = str(device.get("id") or "").strip()
+            if not device_id:
+                skipped += 1
+                continue
+            history = list_device_events(
+                settings.ring_access_token,
+                device_id,
+                settings.ring_api_base_url,
+            )
+            for record in history.get("data") or []:
+                fetched += 1
+                try:
+                    result = pipeline.ingest_ring_history(record, device_id)
+                    if result["duplicate"]:
+                        duplicates += 1
+                    else:
+                        imported += 1
+                except ValueError:
+                    skipped += 1
+
+        state = {
+            "status": "ok",
+            "last_synced_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "devices": len(devices),
+            "fetched": fetched,
+            "imported": imported,
+            "duplicates": duplicates,
+            "skipped": skipped,
+        }
+        store.set_integration_state("ring", state)
+        return state
+    except RingApiError as exc:
+        state = {
+            "status": "error",
+            "last_synced_at": None,
+            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "message": str(exc),
+        }
+        store.set_integration_state("ring", state)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -88,19 +158,12 @@ def explain_incident(incident_id: str) -> dict:
     incident = store.get_incident(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-
     risk = incident["risk"]
     return {
-        "incident_id": incident_id,
-        "risk_score": risk["score"],
+        "incident_id": incident_id, "risk_score": risk["score"],
         "summary": incident["title"],
-        "factors": [
-            {
-                "factor": item["code"].lower(),
-                "contribution": round(item["weight"] * item["value"]),
-            }
-            for item in risk["evidence"]
-        ],
+        "factors": [{"factor": x["code"].lower(), "contribution": round(x["weight"] * x["value"])}
+                    for x in risk["evidence"]],
         "evidence": incident["evidence_events"],
     }
 
@@ -108,8 +171,4 @@ def explain_incident(incident_id: str) -> dict:
 @app.get("/api/v1/policy/{action}")
 def policy_check(action: str) -> dict:
     result = authorize(action)
-    return {
-        "action": action,
-        "decision": result.decision,
-        "reason": result.reason,
-    }
+    return {"action": action, "decision": result.decision, "reason": result.reason}

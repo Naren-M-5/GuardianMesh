@@ -6,7 +6,7 @@ type Factor = { code: string; weight: number; value: number; explanation: string
 type Incident = { title: string; severity: string; status: string; startedAt: string; risk: { score: number; level: string; evidence: Factor[] } };
 type Overview = {
   generatedAt: string; api: { online: boolean; version: string };
-  ring: { online: boolean; count: number; names: string[]; message: string };
+  ring: { online: boolean; count: number; names: string[]; message: string; sync: { status: string; lastSyncedAt: string | null; imported: number; duplicates: number } };
   risk: { score: number; level: string; evidence: Factor[] }; primaryIncident: Incident | null;
   incidents: Incident[]; events: { type: string; source: string; occurredAt: string }[];
   stats: { active: number; observed: number; signals: number };
@@ -20,6 +20,8 @@ export default function Dashboard() {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
   const refresh = useCallback(async () => {
     try {
       const response = await fetch("/api/guardian/overview", { cache: "no-store" });
@@ -29,6 +31,18 @@ export default function Dashboard() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Dashboard unavailable"); }
     finally { setLoading(false); }
   }, []);
+  const syncRing = useCallback(async () => {
+    setSyncing(true); setSyncMessage("");
+    try {
+      const response = await fetch("/api/guardian/ring-sync", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Ring synchronization failed");
+      setSyncMessage(`${body.imported} new event${body.imported === 1 ? "" : "s"} imported · ${body.duplicates} already known`);
+      await refresh();
+    } catch (cause) {
+      setSyncMessage(cause instanceof Error ? cause.message : "Ring synchronization failed");
+    } finally { setSyncing(false); }
+  }, [refresh]);
   useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 15000); return () => window.clearInterval(timer); }, [refresh]);
   const risk = data?.risk.score ?? 0;
   const riskTone = risk >= 70 ? "danger" : risk >= 35 ? "warning" : "safe";
@@ -49,7 +63,7 @@ export default function Dashboard() {
         <div className="dashboard-grid">
           <section className="panel" id="incidents"><PanelHeading eyebrow="PRIORITY VIEW" title="Current assessment"><span className={`pill ${riskTone}`}>{data?.primaryIncident ? label(data.primaryIncident.status) : "All clear"}</span></PanelHeading>{data?.primaryIncident ? <><div className="incident-title"><span className={`metric-icon ${riskTone === "danger" ? "red" : "blue"}`}>!</span><div><h4>{data.primaryIncident.title}</h4><p>{label(data.primaryIncident.severity)} severity · {formatTime(data.primaryIncident.startedAt)}</p></div></div><div className="factors">{data.primaryIncident.risk.evidence.slice(0,4).map((factor) => <div className="factor" key={factor.code}><div><strong>{label(factor.code)}</strong><span>+{Math.round(factor.weight * factor.value)}</span></div><p>{factor.explanation}</p><div className="bar"><i style={{width:`${Math.min(100,factor.value*100)}%`}}/></div></div>)}</div></> : <Empty/>}</section>
           <section className="panel" id="activity"><PanelHeading eyebrow="LIVE FEED" title="Recent activity"><span className="live-dot">LIVE</span></PanelHeading><div className="timeline">{data?.events.length ? data.events.map((event,index)=><div className="timeline-item" key={`${event.occurredAt}-${index}`}><span className="timeline-dot"/><div><strong>{label(event.type)}</strong><p>{event.source} signal processed</p></div><time>{formatTime(event.occurredAt)}</time></div>) : <div className="empty compact"><p>No event data available yet.</p></div>}</div></section>
-          <section className="panel" id="devices"><PanelHeading eyebrow="INTEGRATIONS" title="Ring connection"><span className={`pill ${data?.ring.online ? "safe":"warning"}`}>{data?.ring.online ? "Connected":"Action needed"}</span></PanelHeading><div className="device-body"><div className="device-orbit"><span>◉</span><i/></div><div><h4>{data?.ring.names[0] ?? "Ring device"}</h4><p>{data?.ring.message ?? "Checking secure connection…"}</p><div className="device-tags"><span>Events</span><span>Encrypted</span><span>Local view</span></div></div></div></section>
+          <section className="panel" id="devices"><PanelHeading eyebrow="INTEGRATIONS" title="Ring connection"><span className={`pill ${data?.ring.online ? "safe":"warning"}`}>{data?.ring.online ? "Connected":"Action needed"}</span></PanelHeading><div className="device-body"><div className="device-orbit"><span>◉</span><i/></div><div className="device-copy"><h4>{data?.ring.names[0] ?? "Ring device"}</h4><p>{data?.ring.message ?? "Checking secure connection…"}</p><div className="device-tags"><span>Events</span><span>Encrypted</span><span>Local view</span></div><button className="sync-button" onClick={() => void syncRing()} disabled={syncing || !data?.ring.online}>{syncing ? "Syncing securely…" : "Sync Ring events"}</button><small className="sync-note">{syncMessage || (data?.ring.sync.lastSyncedAt ? `Last sync ${formatTime(data.ring.sync.lastSyncedAt)} · ${data.ring.sync.imported} imported` : "Not synced yet")}</small></div></div></section>
           <section className="panel" id="privacy"><PanelHeading eyebrow="PRIVACY CENTER" title="Designed to know less"><Shield/></PanelHeading><div className="privacy-list"><Privacy title="Credentials stay server-side" detail="OAuth tokens never enter your browser."/><Privacy title="Device IDs are removed" detail="The dashboard receives only safe summaries."/><Privacy title="Local data store" detail="Incident history remains on your machine."/></div></section>
         </div>
       </div><footer><span>GuardianMesh v0.1.0</span><span>Local command center · Auto-refreshes every 15 seconds</span></footer>
