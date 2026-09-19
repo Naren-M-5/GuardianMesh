@@ -4,11 +4,12 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 from packages.guardianmesh_core.pipeline import GuardianPipeline
 from packages.guardianmesh_core.policy import authorize
 from packages.guardianmesh_core.signing import SignatureError, verify
-from packages.guardianmesh_core.storage import Store
+from packages.guardianmesh_core.storage import InvalidIncidentTransition, Store
 
 from .config import settings
 from .ring_client import (
@@ -20,6 +21,10 @@ from .ring_client import (
 app = FastAPI(title="GuardianMesh API", version="0.1.0")
 store = Store(settings.db_path)
 pipeline = GuardianPipeline(store)
+
+
+class ResolveIncidentRequest(BaseModel):
+    resolution: str = Field(min_length=3, max_length=500)
 
 
 def require_local(request: Request) -> None:
@@ -151,6 +156,49 @@ def get_incident(incident_id: str) -> dict:
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
     return incident
+
+
+@app.post("/api/v1/incidents/{incident_id}/acknowledge")
+def acknowledge_incident(incident_id: str, request: Request) -> dict:
+    require_local(request)
+    try:
+        incident = store.transition_incident(
+            incident_id, "acknowledged", actor="local_home_owner"
+        )
+    except InvalidIncidentTransition as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return incident
+
+
+@app.post("/api/v1/incidents/{incident_id}/resolve")
+def resolve_incident(
+    incident_id: str, payload: ResolveIncidentRequest, request: Request
+) -> dict:
+    require_local(request)
+    try:
+        incident = store.transition_incident(
+            incident_id,
+            "resolved",
+            actor="local_home_owner",
+            resolution=payload.resolution,
+        )
+    except InvalidIncidentTransition as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return incident
+
+
+@app.get("/api/v1/incidents/{incident_id}/audit")
+def incident_audit(
+    incident_id: str, request: Request, limit: int = Query(50, ge=1, le=100)
+) -> dict:
+    require_local(request)
+    if not store.get_incident(incident_id):
+        raise HTTPException(status_code=404, detail="Incident not found")
+    return {"items": store.list_incident_audit(incident_id, limit)}
 
 
 @app.get("/api/v1/incidents/{incident_id}/explanation")

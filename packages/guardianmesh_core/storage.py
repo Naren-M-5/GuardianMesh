@@ -5,7 +5,11 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from .models import CanonicalEvent, RiskAssessment
+from .models import CanonicalEvent, RiskAssessment, utc_now
+
+
+class InvalidIncidentTransition(ValueError):
+    """Raised when an incident status change is not allowed."""
 
 
 class Store:
@@ -96,6 +100,70 @@ class Store:
             "SELECT * FROM incidents WHERE incident_id=?", (incident_id,)
         ).fetchone()
         return self._incident(row) if row else None
+
+    def transition_incident(
+        self,
+        incident_id: str,
+        target_status: str,
+        actor: str,
+        resolution: str | None = None,
+    ) -> dict[str, Any] | None:
+        incident = self.get_incident(incident_id)
+        if not incident:
+            return None
+
+        current_status = str(incident["status"])
+        allowed = {
+            "active": {"acknowledged", "resolved"},
+            "observed": {"acknowledged", "resolved"},
+            "acknowledged": {"resolved"},
+            "resolved": set(),
+        }
+        if target_status not in allowed.get(current_status, set()):
+            raise InvalidIncidentTransition(
+                f"Incident cannot change from {current_status} to {target_status}."
+            )
+
+        clean_resolution = resolution.strip() if resolution else None
+        if target_status == "resolved" and not clean_resolution:
+            raise InvalidIncidentTransition("A resolution note is required.")
+
+        occurred_at = utc_now()
+        details = {
+            "from_status": current_status,
+            "to_status": target_status,
+            "resolution": clean_resolution,
+        }
+        with self.connection:
+            self.connection.execute(
+                "UPDATE incidents SET status=?, updated_at=?, resolution=? WHERE incident_id=?",
+                (target_status, occurred_at, clean_resolution, incident_id),
+            )
+            self.connection.execute(
+                "INSERT INTO audit_logs (occurred_at, actor, action, object_id, details_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    occurred_at,
+                    actor,
+                    f"incident.{target_status}",
+                    incident_id,
+                    json.dumps(details),
+                ),
+            )
+        return self.get_incident(incident_id)
+
+    def list_incident_audit(self, incident_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            "SELECT audit_id, occurred_at, actor, action, object_id, details_json "
+            "FROM audit_logs WHERE object_id=? ORDER BY audit_id DESC LIMIT ?",
+            (incident_id, limit),
+        ).fetchall()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["details"] = json.loads(item.pop("details_json"))
+            items.append(item)
+        return items
 
     def set_integration_state(self, integration: str, state: dict[str, Any]) -> None:
         updated_at = str(state.get("updated_at") or state.get("last_synced_at") or "")

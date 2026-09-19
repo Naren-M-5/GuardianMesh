@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 type Factor = { code: string; weight: number; value: number; explanation: string };
-type Incident = { title: string; severity: string; status: string; startedAt: string; risk: { score: number; level: string; evidence: Factor[] } };
+type Incident = { incidentId: string; title: string; severity: string; status: string; startedAt: string; resolution: string | null; risk: { score: number; level: string; evidence: Factor[] } };
 type Overview = {
   generatedAt: string; api: { online: boolean; version: string };
   ring: { online: boolean; count: number; names: string[]; message: string; sync: { status: string; lastSyncedAt: string | null; imported: number; duplicates: number } };
@@ -22,6 +22,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
+  const [incidentAction, setIncidentAction] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const [showResolution, setShowResolution] = useState(false);
+  const [resolutionNote, setResolutionNote] = useState("");
   const refresh = useCallback(async () => {
     try {
       const response = await fetch("/api/guardian/overview", { cache: "no-store" });
@@ -43,9 +47,36 @@ export default function Dashboard() {
       setSyncMessage(cause instanceof Error ? cause.message : "Ring synchronization failed");
     } finally { setSyncing(false); }
   }, [refresh]);
+  const updateIncident = useCallback(async (action: "acknowledge" | "resolve") => {
+    const incident = data?.primaryIncident;
+    if (!incident?.incidentId) return;
+    setIncidentAction(action); setActionMessage("");
+    try {
+      const response = await fetch(`/api/guardian/incidents/${encodeURIComponent(incident.incidentId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, resolution: resolutionNote }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Incident action failed");
+      setActionMessage(`${incident.title}: ${action === "acknowledge" ? "acknowledged" : "resolved and recorded"}`);
+      setShowResolution(false); setResolutionNote("");
+      await refresh();
+    } catch (cause) {
+      setActionMessage(cause instanceof Error ? cause.message : "Incident action failed");
+    } finally { setIncidentAction(""); }
+  }, [data?.primaryIncident, refresh, resolutionNote]);
   useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 15000); return () => window.clearInterval(timer); }, [refresh]);
   const risk = data?.risk.score ?? 0;
-  const riskTone = risk >= 70 ? "danger" : risk >= 35 ? "warning" : "safe";
+  const apiAvailable = Boolean(data?.api.online) && !error;
+  const ringAvailable = apiAvailable && Boolean(data?.ring.online);
+  const riskTone = !apiAvailable ? "warning" : risk >= 70 ? "danger" : risk >= 35 || !ringAvailable ? "warning" : "safe";
+  const statusTitle = !apiAvailable ? (loading ? "Checking system status" : "Assessment unavailable")
+    : risk >= 70 ? "Attention needed" : !ringAvailable ? "Ring connection unavailable"
+    : risk >= 35 ? "Review recorded activity" : "No high-risk activity in stored data";
+  const statusDescription = !apiAvailable ? "Live status is unknown. Any data below is from the last successful refresh."
+    : !ringAvailable ? "Stored incidents remain available, but Ring event access is unavailable. This is not an all-clear."
+    : "Assessment reflects stored events, including simulations. Device access alone does not confirm live monitoring.";
 
   return <main>
     <aside className="sidebar">
@@ -55,15 +86,15 @@ export default function Dashboard() {
       <div className="profile"><div className="avatar">N</div><div><strong>Home Owner</strong><small>Primary administrator</small></div></div>
     </aside>
     <section className="workspace" id="top">
-      <header><div className="title"><button className="mobile-brand"><Shield/></button><div><p className="eyebrow">HOME INTELLIGENCE</p><h1>Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}</h1></div></div><div className="header-actions"><div className={`connection ${data?.api.online ? "online" : ""}`}><i/> {data?.api.online ? "System online" : "Connecting"}</div><button className="refresh" onClick={() => void refresh()} disabled={loading}>{loading ? "Checking…" : "Refresh"}</button></div></header>
-      {error && <div className="error-banner"><strong>Dashboard cannot reach the API.</strong><span>{error}</span><button onClick={() => void refresh()}>Try again</button></div>}
+      <header><div className="title"><button className="mobile-brand"><Shield/></button><div><p className="eyebrow">HOME INTELLIGENCE</p><h1>Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}</h1></div></div><div className="header-actions"><div className={`connection ${apiAvailable ? "online" : ""}`}><i/> {apiAvailable ? "Local API online" : loading ? "Connecting" : "API unavailable"}</div><button className="refresh" onClick={() => void refresh()} disabled={loading}>{loading ? "Checking…" : "Refresh"}</button></div></header>
+      {error && <div className="error-banner"><strong>Dashboard data unavailable.</strong><span>{error}</span><button onClick={() => void refresh()}>Try again</button></div>}
       <div className="content" id="overview">
-        <section className={`status-hero ${riskTone}`}><div className="hero-copy"><div className="status-kicker"><span><Shield size={18}/></span> GUARDIAN STATUS</div><h2>{risk >= 70 ? "Attention needed" : risk >= 35 ? "Monitoring activity" : "Your home is protected"}</h2><p>{risk >= 70 ? "GuardianMesh detected a high-confidence event. Review the evidence below." : "GuardianMesh is watching the signals that matter and keeping routine activity quiet."}</p><div className="hero-meta"><span><i/> API v{data?.api.version ?? "0.1.0"}</span><span><i/> {data?.ring.online ? `${data.ring.count} Ring device${data.ring.count === 1 ? "" : "s"}` : "Ring token needs refresh"}</span><span><i/> Updated {data ? formatTime(data.generatedAt) : "now"}</span></div></div><div className="risk-ring" style={{ "--score": `${risk * 3.6}deg` } as React.CSSProperties}><div><span>{risk}</span><small>RISK SCORE</small><em>{label(data?.risk.level ?? "normal")}</em></div></div></section>
-        <section className="stats-grid"><Metric icon="!" tone="red" name="ACTIVE INCIDENTS" value={data?.stats.active ?? 0} note={data?.stats.active ? "Review recommended" : "No open alerts"}/><Metric icon="≋" tone="blue" name="RECENT SIGNALS" value={data?.stats.signals ?? 0} note="Latest activity window"/><Metric icon="⌾" tone="green" name="CONNECTED DEVICES" value={data?.ring.count ?? 0} note={data?.ring.online ? "Ring connection healthy" : "Refresh OAuth token"}/></section>
+        <section className={`status-hero ${riskTone}`}><div className="hero-copy"><div className="status-kicker"><span><Shield size={18}/></span> GUARDIAN STATUS</div><h2>{statusTitle}</h2><p>{statusDescription}</p><div className="hero-meta"><span><i/> API v{data?.api.version ?? "0.1.0"}</span><span><i/> {ringAvailable ? `${data?.ring.count} Ring device(s) accessible` : "Ring access unavailable"}</span><span><i/> Last loaded {data ? formatTime(data.generatedAt) : "—"}</span></div></div><div className="risk-ring" style={{ "--score": `${risk * 3.6}deg` } as React.CSSProperties}><div><span>{data ? risk : "—"}</span><small>STORED RISK SCORE</small><em>{!apiAvailable ? "Unknown / stale" : label(data?.risk.level ?? "unknown")}</em></div></div></section>
+        <section className="stats-grid"><Metric icon="!" tone="red" name="ACTIVE INCIDENTS" value={data?.stats.active ?? "—"} note={!apiAvailable ? "Unknown / stale" : data?.stats.active ? "Review recommended" : "No active stored incidents"}/><Metric icon="≋" tone="blue" name="RECENT SIGNALS" value={data?.stats.signals ?? "—"} note={apiAvailable ? "Stored activity window" : "Unknown / stale"}/><Metric icon="⌾" tone="green" name="CONNECTED DEVICES" value={ringAvailable ? data?.ring.count ?? 0 : "—"} note={ringAvailable ? "Device API reachable" : "Check token and connection"}/></section>
         <div className="dashboard-grid">
-          <section className="panel" id="incidents"><PanelHeading eyebrow="PRIORITY VIEW" title="Current assessment"><span className={`pill ${riskTone}`}>{data?.primaryIncident ? label(data.primaryIncident.status) : "All clear"}</span></PanelHeading>{data?.primaryIncident ? <><div className="incident-title"><span className={`metric-icon ${riskTone === "danger" ? "red" : "blue"}`}>!</span><div><h4>{data.primaryIncident.title}</h4><p>{label(data.primaryIncident.severity)} severity · {formatTime(data.primaryIncident.startedAt)}</p></div></div><div className="factors">{data.primaryIncident.risk.evidence.slice(0,4).map((factor) => <div className="factor" key={factor.code}><div><strong>{label(factor.code)}</strong><span>+{Math.round(factor.weight * factor.value)}</span></div><p>{factor.explanation}</p><div className="bar"><i style={{width:`${Math.min(100,factor.value*100)}%`}}/></div></div>)}</div></> : <Empty/>}</section>
-          <section className="panel" id="activity"><PanelHeading eyebrow="LIVE FEED" title="Recent activity"><span className="live-dot">LIVE</span></PanelHeading><div className="timeline">{data?.events.length ? data.events.map((event,index)=><div className="timeline-item" key={`${event.occurredAt}-${index}`}><span className="timeline-dot"/><div><strong>{label(event.type)}</strong><p>{event.source} signal processed</p></div><time>{formatTime(event.occurredAt)}</time></div>) : <div className="empty compact"><p>No event data available yet.</p></div>}</div></section>
-          <section className="panel" id="devices"><PanelHeading eyebrow="INTEGRATIONS" title="Ring connection"><span className={`pill ${data?.ring.online ? "safe":"warning"}`}>{data?.ring.online ? "Connected":"Action needed"}</span></PanelHeading><div className="device-body"><div className="device-orbit"><span>◉</span><i/></div><div className="device-copy"><h4>{data?.ring.names[0] ?? "Ring device"}</h4><p>{data?.ring.message ?? "Checking secure connection…"}</p><div className="device-tags"><span>Events</span><span>Encrypted</span><span>Local view</span></div><button className="sync-button" onClick={() => void syncRing()} disabled={syncing || !data?.ring.online}>{syncing ? "Syncing securely…" : "Sync Ring events"}</button><small className="sync-note">{syncMessage || (data?.ring.sync.lastSyncedAt ? `Last sync ${formatTime(data.ring.sync.lastSyncedAt)} · ${data.ring.sync.imported} imported` : "Not synced yet")}</small></div></div></section>
+          <section className="panel" id="incidents"><PanelHeading eyebrow="PRIORITY VIEW" title="Current assessment"><span className={`pill ${riskTone}`}>{!apiAvailable ? "Unknown / stale" : data?.primaryIncident ? label(data.primaryIncident.status) : "No unresolved incidents"}</span></PanelHeading>{data?.primaryIncident ? <><div className="incident-title"><span className={`metric-icon ${riskTone === "danger" ? "red" : "blue"}`}>!</span><div><h4>{data.primaryIncident.title}</h4><p>{label(data.primaryIncident.severity)} severity · {formatTime(data.primaryIncident.startedAt)}</p></div></div><div className="factors">{data.primaryIncident.risk.evidence.slice(0,4).map((factor) => <div className="factor" key={factor.code}><div><strong>{label(factor.code)}</strong><span>+{Math.round(factor.weight * factor.value)}</span></div><p>{factor.explanation}</p><div className="bar"><i style={{width:`${Math.min(100,factor.value*100)}%`}}/></div></div>)}</div><div className="incident-actions"><button onClick={() => void updateIncident("acknowledge")} disabled={!apiAvailable || Boolean(incidentAction) || data.primaryIncident.status === "acknowledged"}>{incidentAction === "acknowledge" ? "Saving…" : data.primaryIncident.status === "acknowledged" ? "Acknowledged" : "Acknowledge"}</button><button className="resolve-button" onClick={() => setShowResolution((visible) => !visible)} disabled={!apiAvailable || Boolean(incidentAction)}>Resolve</button></div>{showResolution && <div className="resolution-form"><label htmlFor="resolution-note">Resolution note</label><textarea id="resolution-note" value={resolutionNote} onChange={(event) => setResolutionNote(event.target.value)} maxLength={500} placeholder="What happened and how was it handled?"/><div><small>{resolutionNote.length}/500</small><button onClick={() => void updateIncident("resolve")} disabled={!apiAvailable || resolutionNote.trim().length < 3 || Boolean(incidentAction)}>{incidentAction === "resolve" ? "Resolving…" : "Confirm resolution"}</button></div></div>}</> : !apiAvailable ? <div className="empty"><p>Assessment data unavailable.</p></div> : <Empty/>}{actionMessage && <p className="action-message" role="status">{actionMessage}</p>}</section>
+          <section className="panel" id="activity"><PanelHeading eyebrow="STORED EVENTS" title="Recent activity"><span className="pill">{apiAvailable ? "Stored history" : "Unknown / stale"}</span></PanelHeading><div className="timeline">{data?.events.length ? data.events.map((event,index)=><div className="timeline-item" key={`${event.occurredAt}-${index}`}><span className="timeline-dot"/><div><strong>{label(event.type)}</strong><p>{event.source} signal processed</p></div><time>{formatTime(event.occurredAt)}</time></div>) : <div className="empty compact"><p>No event data available yet.</p></div>}</div></section>
+          <section className="panel" id="devices"><PanelHeading eyebrow="INTEGRATIONS" title="Ring connection"><span className={`pill ${ringAvailable ? "safe":"warning"}`}>{ringAvailable ? "API reachable":"Action needed"}</span></PanelHeading><div className="device-body"><div className="device-orbit"><span>◉</span><i/></div><div className="device-copy"><h4>{data?.ring.names[0] ?? "Ring device"}</h4><p>{!apiAvailable ? "Ring status unknown while API data is unavailable." : data?.ring.message}</p><div className="device-tags"><span>Events</span><span>Encrypted</span><span>Local view</span></div><button className="sync-button" onClick={() => void syncRing()} disabled={syncing || !ringAvailable}>{syncing ? "Syncing securely…" : "Sync Ring events"}</button><small className="sync-note">{syncMessage || (data?.ring.sync.lastSyncedAt ? `Last sync ${formatTime(data.ring.sync.lastSyncedAt)} · ${data.ring.sync.imported} imported` : "Not synced yet")}</small></div></div></section>
           <section className="panel" id="privacy"><PanelHeading eyebrow="PRIVACY CENTER" title="Designed to know less"><Shield/></PanelHeading><div className="privacy-list"><Privacy title="Credentials stay server-side" detail="OAuth tokens never enter your browser."/><Privacy title="Device IDs are removed" detail="The dashboard receives only safe summaries."/><Privacy title="Local data store" detail="Incident history remains on your machine."/></div></section>
         </div>
       </div><footer><span>GuardianMesh v0.1.0</span><span>Local command center · Auto-refreshes every 15 seconds</span></footer>
@@ -71,7 +102,7 @@ export default function Dashboard() {
   </main>;
 }
 
-function Metric({icon,tone,name,value,note}:{icon:string;tone:string;name:string;value:number;note:string}) { return <article><span className={`metric-icon ${tone}`}>{icon}</span><div><small>{name}</small><strong>{value}</strong><p>{note}</p></div></article>; }
+function Metric({icon,tone,name,value,note}:{icon:string;tone:string;name:string;value:number|string;note:string}) { return <article><span className={`metric-icon ${tone}`}>{icon}</span><div><small>{name}</small><strong>{value}</strong><p>{note}</p></div></article>; }
 function PanelHeading({eyebrow,title,children}:{eyebrow:string;title:string;children:React.ReactNode}) { return <div className="panel-heading"><div><p className="eyebrow">{eyebrow}</p><h3>{title}</h3></div>{children}</div>; }
 function Privacy({title,detail}:{title:string;detail:string}) { return <div><span>✓</span><p><strong>{title}</strong><small>{detail}</small></p></div>; }
-function Empty() { return <div className="empty"><Shield size={36}/><h4>No incidents yet</h4><p>Run a simulation or wait for a Ring event. New assessments will appear automatically.</p></div>; }
+function Empty() { return <div className="empty"><Shield size={36}/><h4>No unresolved incidents</h4><p>Run a simulation or wait for a Ring event. New assessments will appear automatically.</p></div>; }

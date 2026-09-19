@@ -22,6 +22,9 @@ export async function GET() {
   if (healthResult.status === "rejected") {
     return NextResponse.json({ error: "GuardianMesh API is offline", detail: "Start FastAPI on port 8000 and refresh." }, { status: 503 });
   }
+  if (incidentsResult.status === "rejected" || eventsResult.status === "rejected") {
+    return NextResponse.json({ error: "Assessment data is unavailable", detail: "Incident or event data could not be loaded. Check FastAPI and try again." }, { status: 503 });
+  }
 
   const rawIncidents = incidentsResult.status === "fulfilled" ? list(incidentsResult.value.items) : [];
   const rawEvents = eventsResult.status === "fulfilled" ? list(eventsResult.value.items) : [];
@@ -33,8 +36,10 @@ export async function GET() {
       explanation: text(factor.explanation, "Observed by GuardianMesh."),
     }));
     return {
+      incidentId: text(item.incident_id, ""),
       title: text(item.title, "Observed activity"), severity: text(item.severity, "normal"),
       status: text(item.status, "observed"), startedAt: text(item.started_at, new Date().toISOString()),
+      resolution: typeof item.resolution === "string" ? item.resolution : null,
       risk: { score: number(risk.score), level: text(risk.level, "normal"), evidence },
     };
   });
@@ -45,7 +50,9 @@ export async function GET() {
   // Deliberately discard raw Ring IDs and relationships before responding to the browser.
   const deviceNames = rawDevices.map((item) => text(object(item.attributes).name, "Ring device")).slice(0, 3);
   const sync = syncResult.status === "fulfilled" ? syncResult.value : {};
-  const highest = incidents.reduce<(typeof incidents)[number] | undefined>(
+  const unresolved = incidents.filter((incident) => incident.status !== "resolved");
+  const active = incidents.filter((incident) => ["active", "acknowledged"].includes(incident.status));
+  const highest = unresolved.reduce<(typeof incidents)[number] | undefined>(
     (current, incident) => !current || incident.risk.score > current.risk.score ? incident : current, undefined,
   );
 
@@ -53,7 +60,7 @@ export async function GET() {
     generatedAt: new Date().toISOString(), api: { online: true, version: text(healthResult.value.version, "0.1.0") },
     ring: {
       online: devicesResult.status === "fulfilled", count: rawDevices.length, names: deviceNames,
-      message: devicesResult.status === "fulfilled" ? "Connected securely" : "Token unavailable or expired — generate a fresh Playground token",
+      message: devicesResult.status === "fulfilled" ? "Device API reachable" : "Ring unavailable — check your token and connection",
       sync: {
         status: text(sync.status, "never_synced"),
         lastSyncedAt: typeof sync.last_synced_at === "string" ? sync.last_synced_at : null,
@@ -62,6 +69,6 @@ export async function GET() {
     },
     risk: highest?.risk ?? { score: 0, level: "normal", evidence: [] }, primaryIncident: highest ?? null,
     incidents, events,
-    stats: { active: incidents.filter((incident) => incident.status === "active").length, observed: incidents.length, signals: rawEvents.length },
+    stats: { active: active.length, observed: incidents.length, signals: rawEvents.length },
   });
 }
