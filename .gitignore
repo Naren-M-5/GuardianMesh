@@ -11,3 +11,5 @@ coverage/
 dist/
 *.egg-info/
 .env*.local
+*.db-shm
+*.db-wal
