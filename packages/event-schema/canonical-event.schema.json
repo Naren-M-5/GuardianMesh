@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guardianmesh.dev/schemas/canonical-event-1.0.json",
+  "title": "CanonicalEvent",
+  "type": "object",
+  "required": ["schema_version", "event_id", "source", "source_event_id", "event_type", "occurred_at", "received_at", "space_id", "device_id", "zone_id", "integrity"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "event_id": {"type": "string", "pattern": "^evt_"},
+    "source": {"enum": ["ring", "simulator", "vision"]},
+    "source_event_id": {"type": "string", "minLength": 1},
+    "event_type": {"enum": ["motion.detected", "doorbell.pressed", "person.detected", "animal.detected", "vehicle.detected", "device.online", "device.offline", "zone.entered", "zone.exited"]},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "received_at": {"type": "string", "format": "date-time"},
+    "space_id": {"type": "string", "minLength": 1},
+    "device_id": {"type": "string", "minLength": 1},
+    "zone_id": {"type": "string", "minLength": 1},
+    "classification": {"type": "object"},
+    "attributes": {"type": "object"},
+    "media": {"type": "object"},
+    "integrity": {
+      "type": "object",
+      "required": ["signature_verified", "duplicate"],
+      "properties": {
+        "signature_verified": {"type": "boolean"},
+        "duplicate": {"type": "boolean"}
+      }
+    }
+  },
+  "additionalProperties": false
+}

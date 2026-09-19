@@ -1,0 +1,1 @@
+[{"id":"ring_demo_late_resident_001","type":"person.detected","occurred_at":"2026-09-19T02:13:08Z","space_id":"space_home_001","device_id":"ring_frontdoor_001","zone_id":"front_entrance","classification":{"label":"person","confidence":0.98},"attributes":{"duration_seconds":8,"resident_confirmed":true}}]
