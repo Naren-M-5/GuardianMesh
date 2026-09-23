@@ -5,7 +5,11 @@ from datetime import datetime
 from .models import CanonicalEvent, RiskAssessment, RiskFactor, new_id
 
 
-def assess(event: CanonicalEvent) -> tuple[RiskAssessment, dict]:
+def _risk_factors(event: CanonicalEvent) -> list[RiskFactor]:
+    # A viewing session describes use of the camera, not activity in its zone.
+    # Keep it in history without treating session length or time as a threat.
+    if event.event_type == "live_view.started":
+        return []
     hour = datetime.fromisoformat(event.occurred_at.replace("Z", "+00:00")).hour
     factors: list[RiskFactor] = []
     if hour < 5:
@@ -23,6 +27,11 @@ def assess(event: CanonicalEvent) -> tuple[RiskAssessment, dict]:
     if bool(event.attributes.get("rare_sequence")):
         factors.append(RiskFactor("RARE_SEQUENCE", 24, 0.9,
                                   "The observed event sequence is uncommon."))
+    return factors
+
+
+def assess(event: CanonicalEvent) -> tuple[RiskAssessment, dict]:
+    factors = _risk_factors(event)
     score = min(100, sum(round(f.weight * f.value) for f in factors))
     level = "high" if score >= 70 else "suspicious" if score >= 40 else "watch" if score >= 20 else "normal"
     incident_id = new_id("inc")
