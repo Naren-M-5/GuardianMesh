@@ -26,6 +26,22 @@ export default function Dashboard() {
   const [actionMessage, setActionMessage] = useState("");
   const [showResolution, setShowResolution] = useState(false);
   const [resolutionNote, setResolutionNote] = useState("");
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [demoMessage, setDemoMessage] = useState("");
+  async function runDemo(scenario: string) {
+    setDemoBusy(true); setDemoMessage("");
+    try {
+      const response = await fetch("/api/guardian/demo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario }), signal: AbortSignal.timeout(15000),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Demo failed");
+      setDemoMessage(`Simulation: ${result.scenario} — score ${result.score}, ${result.level}. Saved to local history.`);
+      await refresh();
+    } catch (cause) { setDemoMessage(cause instanceof Error ? cause.message : "Demo failed"); }
+    finally { setDemoBusy(false); }
+  }
   const refresh = useCallback(async () => {
     try {
       const response = await fetch("/api/guardian/overview", { cache: "no-store" });
@@ -89,6 +105,15 @@ export default function Dashboard() {
       <header><div className="title"><button className="mobile-brand"><Shield/></button><div><p className="eyebrow">HOME INTELLIGENCE</p><h1>Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}</h1></div></div><div className="header-actions"><div className={`connection ${apiAvailable ? "online" : ""}`}><i/> {apiAvailable ? "Local API online" : loading ? "Connecting" : "API unavailable"}</div><button className="refresh" onClick={() => void refresh()} disabled={loading}>{loading ? "Checking…" : "Refresh"}</button></div></header>
       {error && <div className="error-banner"><strong>Dashboard data unavailable.</strong><span>{error}</span><button onClick={() => void refresh()}>Try again</button></div>}
       <div className="content" id="overview">
+        <section className="panel" style={{ marginBottom: 20 }}>
+          <PanelHeading eyebrow="SIMULATION ONLY" title="Local demo"><span className="pill">No Ring token needed</span></PanelHeading>
+          <p>Synthetic scenarios add labeled events to local history. Scenario timestamps are fixed to daytime or nighttime; scores use demonstration rules.</p>
+          <div className="incident-actions">
+            {["intrusion", "delivery", "routine"].map(scenario => <button key={scenario} disabled={demoBusy || !apiAvailable} onClick={() => void runDemo(scenario)}>{label(scenario)}</button>)}
+          </div>
+          <p className="action-message" role="status">{demoBusy ? "Running simulation…" : demoMessage}</p>
+          <p>Existing unresolved incidents may keep the main score higher. Resolve a demo incident before starting the next scenario.</p>
+        </section>
         <section className={`status-hero ${riskTone}`}><div className="hero-copy"><div className="status-kicker"><span><Shield size={18}/></span> GUARDIAN STATUS</div><h2>{statusTitle}</h2><p>{statusDescription}</p><div className="hero-meta"><span><i/> API v{data?.api.version ?? "0.1.0"}</span><span><i/> {ringAvailable ? `${data?.ring.count} Ring device(s) accessible` : "Ring access unavailable"}</span><span><i/> Last loaded {data ? formatTime(data.generatedAt) : "—"}</span></div></div><div className="risk-ring" style={{ "--score": `${risk * 3.6}deg` } as React.CSSProperties}><div><span>{data ? risk : "—"}</span><small>STORED RISK SCORE</small><em>{!apiAvailable ? "Unknown / stale" : label(data?.risk.level ?? "unknown")}</em></div></div></section>
         <section className="stats-grid"><Metric icon="!" tone="red" name="ACTIVE INCIDENTS" value={data?.stats.active ?? "—"} note={!apiAvailable ? "Unknown / stale" : data?.stats.active ? "Review recommended" : "No active stored incidents"}/><Metric icon="≋" tone="blue" name="RECENT SIGNALS" value={data?.stats.signals ?? "—"} note={apiAvailable ? "Stored activity window" : "Unknown / stale"}/><Metric icon="⌾" tone="green" name="CONNECTED DEVICES" value={ringAvailable ? data?.ring.count ?? 0 : "—"} note={ringAvailable ? "Device API reachable" : "Check token and connection"}/></section>
         <div className="dashboard-grid">

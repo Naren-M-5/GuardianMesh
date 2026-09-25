@@ -12,6 +12,7 @@ from packages.guardianmesh_core.signing import SignatureError, verify
 from packages.guardianmesh_core.storage import InvalidIncidentTransition, Store
 
 from .config import settings
+from packages.guardianmesh_core.demo import run_demo
 from .ring_client import (
     RingApiError,
     list_device_events,
@@ -39,6 +40,18 @@ def require_local(request: Request) -> None:
 @app.get("/api/v1/health")
 def health() -> dict:
     return {"status": "healthy", "version": "0.1.0"}
+
+
+@app.post("/api/v1/demo/{scenario}")
+def demo_scenario(scenario: str, request: Request) -> dict:
+    require_local(request)
+    origin = request.headers.get("origin")
+    if origin and origin not in {"http://localhost:3000", "http://127.0.0.1:3000"}:
+        raise HTTPException(status_code=403, detail="Local demo only")
+    try:
+        return run_demo(store, scenario)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/integrations/ring/webhook", status_code=202)
