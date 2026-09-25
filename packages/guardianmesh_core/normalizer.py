@@ -44,7 +44,12 @@ def normalize_ring(payload: dict[str, Any], signature_verified: bool) -> Canonic
         attributes=dict(payload.get("attributes") or {}),
         media={"available": bool(payload.get("media_available", False)),
                "retention": "ephemeral", "reference": None},
-        integrity={"signature_verified": signature_verified, "duplicate": False},
+        integrity={
+            "signature_verified": signature_verified, "duplicate": False,
+            "ingestion_method": "webhook",
+            # A declaration from the sender, not proof of physical-device origin.
+            "simulation_declared": payload.get("simulation") is True,
+        },
     )
 
 
@@ -107,6 +112,7 @@ def normalize_ring_history(record: dict[str, Any], fallback_device_id: str = "")
         integrity={
             "signature_verified": False,
             "authenticated_source": True,
+            "ingestion_method": "ring_history",
             "duplicate": False,
         },
     )

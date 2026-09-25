@@ -16,6 +16,7 @@ def main() -> None:
     args = parser.parse_args()
     events = json.loads(args.scenario.read_text(encoding="utf-8"))
     for event in events:
+        event = {**event, "simulation": True}
         body = json.dumps(event, separators=(",", ":")).encode()
         timestamp = str(int(time.time()))
         signature = hmac.new(args.secret.encode(), timestamp.encode() + b"." + body,

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { eventSourceLabel } from "../../../../lib/event-source";
 
 export const dynamic = "force-dynamic";
 const API_BASE = (process.env.GUARDIANMESH_API_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
@@ -44,7 +45,7 @@ export async function GET() {
     };
   });
   const events = rawEvents.slice(0, 8).map((item) => ({
-    type: text(item.type ?? item.event_type, "activity").replaceAll("_", " "), source: text(item.source, "Ring"),
+    type: text(item.type ?? item.event_type, "activity").replaceAll("_", " "), source: eventSourceLabel(item),
     occurredAt: text(item.occurred_at ?? item.created_at, new Date().toISOString()),
   }));
   // Deliberately discard raw Ring IDs and relationships before responding to the browser.
