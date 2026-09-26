@@ -16,10 +16,10 @@ const text = (value: unknown, fallback = "Unknown"): string => typeof value === 
 const number = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
 
 export async function GET() {
-  const [healthResult, incidentsResult, eventsResult, devicesResult, syncResult, baselinesResult, evaluationResult] = await Promise.allSettled([
+  const [healthResult, incidentsResult, eventsResult, devicesResult, syncResult, baselinesResult, evaluationResult, briefingResult] = await Promise.allSettled([
     apiGet("/api/v1/health"), apiGet("/api/v1/incidents?limit=25"), apiGet("/api/v1/events?limit=25"),
     apiGet("/api/v1/integrations/ring/devices"), apiGet("/api/v1/integrations/ring/sync/status"),
-    apiGet("/api/v1/baselines"), apiGet("/api/v1/evaluation"),
+    apiGet("/api/v1/baselines"), apiGet("/api/v1/evaluation"), apiGet("/api/v1/briefing"),
   ]);
   if (healthResult.status === "rejected") {
     return NextResponse.json({ error: "GuardianMesh API is offline", detail: "Start FastAPI on port 8000 and refresh." }, { status: 503 });
@@ -72,6 +72,8 @@ export async function GET() {
   const evaluation = evaluationResult.status === "fulfilled" ? evaluationResult.value : {};
   const evaluationMetrics = object(evaluation.metrics);
   const evaluationLearning = object(evaluation.learning);
+  const briefing = briefingResult.status === "fulfilled" ? briefingResult.value : {};
+  const briefingCounts = object(briefing.counts);
   const unresolved = incidents.filter((incident) => incident.status !== "resolved");
   const active = incidents.filter((incident) => ["active", "acknowledged"].includes(incident.status));
   const highest = unresolved.reduce<(typeof incidents)[number] | undefined>(
@@ -111,6 +113,17 @@ export async function GET() {
       learnedScore: number(evaluationLearning.late_resident_learned_score),
       riskReduction: number(evaluationLearning.risk_reduction),
       limitations: text(evaluation.limitations, "Synthetic benchmark unavailable."),
+    },
+    briefing: {
+      state: text(briefing.state, "unavailable"),
+      headline: text(briefing.headline, "Household briefing unavailable"),
+      summary: text(briefing.summary, "Stored metadata could not be summarized."),
+      recommendedAction: text(briefing.recommended_action, "Review the dashboard directly."),
+      storedSignals: number(briefingCounts.stored_signals),
+      unresolvedSituations: number(briefingCounts.unresolved_situations),
+      attentionSituations: number(briefingCounts.attention_situations),
+      privacy: text(briefing.privacy, "No media is included."),
+      limitations: text(briefing.limitations, "This briefing does not confirm safety."),
     },
     incidents, events,
     stats: { active: active.length, observed: incidents.length, signals: rawEvents.length },

@@ -12,12 +12,18 @@ type Explanation = {
   counterfactuals: { without: string; score: number; change: number }[];
   grounding: string; limitations: string;
 };
+type JudgeStory = {
+  story: string; customer: string; simulation: boolean; privacy: string;
+  stages: { step: number; event_type: string; score: number; level: string }[];
+  explanation: Explanation;
+};
 type Overview = {
   generatedAt: string; api: { online: boolean; version: string };
   ring: { online: boolean; count: number; names: string[]; message: string; sync: { status: string; lastSyncedAt: string | null; imported: number; duplicates: number } };
   risk: { score: number; level: string; evidence: Factor[] }; primaryIncident: Incident | null;
   baseline: { status: string; sampleCount: number; minimumSamples: number; confidence: number; activeHours: number[]; medianDurationSeconds: number; privacy: string };
   evaluation: { synthetic: boolean; total: number; passed: number; falsePositives: number; falseNegatives: number; precision: number; recall: number; coldScore: number; learnedScore: number; riskReduction: number; limitations: string };
+  briefing: { state: string; headline: string; summary: string; recommendedAction: string; storedSignals: number; unresolvedSituations: number; attentionSituations: number; privacy: string; limitations: string };
   incidents: Incident[]; events: { type: string; source: string; occurredAt: string }[];
   stats: { active: number; observed: number; signals: number };
 };
@@ -41,6 +47,22 @@ export default function Dashboard() {
   const [resolutionOutcome, setResolutionOutcome] = useState("harmless_activity");
   const [demoBusy, setDemoBusy] = useState(false);
   const [demoMessage, setDemoMessage] = useState("");
+  const [judgeBusy, setJudgeBusy] = useState(false);
+  const [judgeStory, setJudgeStory] = useState<JudgeStory | null>(null);
+  const [judgeError, setJudgeError] = useState("");
+  async function runJudgeStory() {
+    setJudgeBusy(true); setJudgeError(""); setJudgeStory(null);
+    try {
+      const response = await fetch("/api/guardian/judge-story", {
+        method: "POST", signal: AbortSignal.timeout(20000),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Judge story failed");
+      setJudgeStory(result as JudgeStory);
+      await refresh();
+    } catch (cause) { setJudgeError(cause instanceof Error ? cause.message : "Judge story failed"); }
+    finally { setJudgeBusy(false); }
+  }
   async function runDemo(scenario: string) {
     setDemoBusy(true); setDemoMessage("");
     try {
@@ -132,6 +154,17 @@ export default function Dashboard() {
       <header><div className="title"><button className="mobile-brand"><Shield/></button><div><p className="eyebrow">HOME INTELLIGENCE</p><h1>Good {new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}</h1></div></div><div className="header-actions"><div className={`connection ${apiAvailable ? "online" : ""}`}><i/> {apiAvailable ? "Local API online" : loading ? "Connecting" : "API unavailable"}</div><button className="refresh" onClick={() => void refresh()} disabled={loading}>{loading ? "Checking…" : "Refresh"}</button></div></header>
       {error && <div className="error-banner"><strong>Dashboard data unavailable.</strong><span>{error}</span><button onClick={() => void refresh()}>Try again</button></div>}
       <div className="content" id="overview">
+        <section className="panel judge-panel" style={{ marginBottom: 20 }}>
+          <PanelHeading eyebrow="90-SECOND JUDGE MODE" title="One story. Three signals. One decision."><span className="pill danger">Submission walkthrough</span></PanelHeading>
+          <div className="judge-intro"><div><h4>A caregiver needs context—not another motion notification.</h4><p>Watch GuardianMesh correlate an evolving entrance situation, explain the score, and keep the final decision with a human.</p></div><button onClick={() => void runJudgeStory()} disabled={judgeBusy || !apiAvailable}>{judgeBusy ? "Building the situation…" : "Run judge story"}</button></div>
+          {judgeError && <p className="action-message">{judgeError}</p>}
+          {judgeStory && <div className="judge-result">
+            <p>{judgeStory.story}</p>
+            <div className="judge-stages">{judgeStory.stages.map((stage) => <div key={stage.step} className={stage.score >= 70 ? "critical" : ""}><small>Signal {stage.step}</small><strong>{label(stage.event_type)}</strong><span>Risk {stage.score} · {label(stage.level)}</span></div>)}</div>
+            <div className="judge-conclusion"><strong>Why GuardianMesh escalated</strong><p>{judgeStory.explanation.narrative}</p><span>Evidence {judgeStory.explanation.calculation.evidence_total} → Final {judgeStory.explanation.calculation.final_score}</span></div>
+            <small>{judgeStory.privacy} This is a labeled simulation; the Ring Playground interaction must be shown separately in the submission video.</small>
+          </div>}
+        </section>
         <section className="panel" style={{ marginBottom: 20 }}>
           <PanelHeading eyebrow="SIMULATION ONLY" title="Local demo"><span className="pill">No Ring token needed</span></PanelHeading>
           <p>Synthetic scenarios add labeled events to local history. Scenario timestamps are fixed to daytime or nighttime; scores use demonstration rules.</p>
@@ -150,6 +183,11 @@ export default function Dashboard() {
           </div>
           <div className="baseline-progress"><i style={{ width: `${Math.min(100, ((data?.baseline.sampleCount ?? 0) / Math.max(1, data?.baseline.minimumSamples ?? 3)) * 100)}%` }}/></div>
           <p>{data?.baseline.privacy ?? "Waiting for confirmed benign outcomes."}</p>
+        </section>
+        <section className={`panel briefing-panel ${data?.briefing.state ?? "unavailable"}`} style={{ marginBottom: 20 }}>
+          <PanelHeading eyebrow="CARETAKER BRIEFING" title="What matters right now"><span className={`pill ${data?.briefing.state === "attention" ? "danger" : data?.briefing.state === "review" ? "warning" : "safe"}`}>{label(data?.briefing.state ?? "unavailable")}</span></PanelHeading>
+          <div className="briefing-body"><div><h4>{data?.briefing.headline ?? "Loading household context…"}</h4><p>{data?.briefing.summary}</p><strong>{data?.briefing.recommendedAction}</strong></div><div className="briefing-counts"><span><b>{data?.briefing.storedSignals ?? 0}</b> signals</span><span><b>{data?.briefing.unresolvedSituations ?? 0}</b> unresolved</span><span><b>{data?.briefing.attentionSituations ?? 0}</b> need attention</span></div></div>
+          <p className="briefing-boundary">{data?.briefing.privacy} {data?.briefing.limitations}</p>
         </section>
         <section className="panel evaluation-panel" style={{ marginBottom: 20 }}>
           <PanelHeading eyebrow="SYNTHETIC BENCHMARK" title="Measured decision behavior"><span className="pill safe">{data?.evaluation.passed ?? 0} / {data?.evaluation.total ?? 0} scenarios</span></PanelHeading>

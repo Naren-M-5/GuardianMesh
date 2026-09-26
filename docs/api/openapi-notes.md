@@ -13,6 +13,8 @@ Base path: `/api/v1`.
 | GET | `/incidents` | Incident list |
 | GET | `/baselines` | Privacy-preserving learned routine summaries |
 | GET | `/evaluation` | Reproducible synthetic benchmark report and limitations |
+| GET | `/briefing` | Privacy-safe household summary for human review |
+| POST | `/demo/judge-story` | Local-only canonical three-signal walkthrough |
 | GET | `/incidents/{id}` | Incident detail |
 | GET | `/incidents/{id}/explanation` | Numeric evidence explanation |
 | POST | `/incidents/{id}/acknowledge` | Record owner acknowledgement |

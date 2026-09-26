@@ -6,6 +6,7 @@ from .normalizer import normalize_ring
 from .risk import assess
 from .storage import Store
 from .pipeline import GuardianPipeline
+from .explanation import explain_incident
 
 
 def run_demo(store: Store, scenario: str) -> dict:
@@ -80,4 +81,28 @@ def run_situation_demo(pipeline: GuardianPipeline, scenario: str) -> dict:
         "scenario": scenario, "simulation": True,
         "incident_id": latest["incident_id"], "stages": stages,
         "risk": latest["risk"],
+    }
+
+
+def run_judge_story(pipeline: GuardianPipeline, store: Store) -> dict:
+    """Run the canonical three-beat demo used in the submission walkthrough."""
+    result = run_situation_demo(pipeline, "evolving_intrusion")
+    incident = store.get_incident(result["incident_id"])
+    assert incident is not None
+    events = [
+        event.to_dict()
+        for event in store.get_events_by_ids(incident["evidence_events"])
+    ]
+    return {
+        "story": "A quiet entrance becomes a situation, not three disconnected alerts.",
+        "customer": (
+            "A homeowner or caregiver needs context, not a stream of motion notifications."
+        ),
+        "simulation": True,
+        "incident_id": result["incident_id"],
+        "stages": result["stages"],
+        "explanation": explain_incident(incident, events),
+        "privacy": (
+            "The walkthrough uses synthetic event metadata and performs no identity recognition."
+        ),
     }

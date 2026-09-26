@@ -13,7 +13,8 @@ from packages.guardianmesh_core.signing import SignatureError, verify
 from packages.guardianmesh_core.storage import InvalidIncidentTransition, Store
 
 from .config import settings
-from packages.guardianmesh_core.demo import run_demo, run_situation_demo
+from packages.guardianmesh_core.demo import run_demo, run_judge_story, run_situation_demo
+from packages.guardianmesh_core.briefing import build_household_briefing
 from packages.guardianmesh_core.explanation import explain_incident as build_explanation
 from packages.guardianmesh_core.evaluation import run_evaluation
 from .ring_client import (
@@ -53,6 +54,21 @@ def health() -> dict:
 def evaluation_report(request: Request) -> dict:
     require_local(request)
     return run_evaluation()
+
+
+@app.get("/api/v1/briefing")
+def household_briefing(request: Request) -> dict:
+    require_local(request)
+    return build_household_briefing(store.list_incidents(100), store.list_events(limit=100))
+
+
+@app.post("/api/v1/demo/judge-story")
+def judge_story(request: Request) -> dict:
+    require_local(request)
+    origin = request.headers.get("origin")
+    if origin and origin not in {"http://localhost:3000", "http://127.0.0.1:3000"}:
+        raise HTTPException(status_code=403, detail="Local demo only")
+    return run_judge_story(pipeline, store)
 
 
 @app.post("/api/v1/demo/{scenario}")
