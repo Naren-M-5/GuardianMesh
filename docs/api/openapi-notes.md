@@ -12,6 +12,7 @@ Base path: `/api/v1`.
 | GET | `/events` | Canonical event list |
 | GET | `/incidents` | Incident list |
 | GET | `/baselines` | Privacy-preserving learned routine summaries |
+| GET | `/evaluation` | Reproducible synthetic benchmark report and limitations |
 | GET | `/incidents/{id}` | Incident detail |
 | GET | `/incidents/{id}/explanation` | Numeric evidence explanation |
 | POST | `/incidents/{id}/acknowledge` | Record owner acknowledgement |

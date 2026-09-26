@@ -17,6 +17,7 @@ type Overview = {
   ring: { online: boolean; count: number; names: string[]; message: string; sync: { status: string; lastSyncedAt: string | null; imported: number; duplicates: number } };
   risk: { score: number; level: string; evidence: Factor[] }; primaryIncident: Incident | null;
   baseline: { status: string; sampleCount: number; minimumSamples: number; confidence: number; activeHours: number[]; medianDurationSeconds: number; privacy: string };
+  evaluation: { synthetic: boolean; total: number; passed: number; falsePositives: number; falseNegatives: number; precision: number; recall: number; coldScore: number; learnedScore: number; riskReduction: number; limitations: string };
   incidents: Incident[]; events: { type: string; source: string; occurredAt: string }[];
   stats: { active: number; observed: number; signals: number };
 };
@@ -149,6 +150,16 @@ export default function Dashboard() {
           </div>
           <div className="baseline-progress"><i style={{ width: `${Math.min(100, ((data?.baseline.sampleCount ?? 0) / Math.max(1, data?.baseline.minimumSamples ?? 3)) * 100)}%` }}/></div>
           <p>{data?.baseline.privacy ?? "Waiting for confirmed benign outcomes."}</p>
+        </section>
+        <section className="panel evaluation-panel" style={{ marginBottom: 20 }}>
+          <PanelHeading eyebrow="SYNTHETIC BENCHMARK" title="Measured decision behavior"><span className="pill safe">{data?.evaluation.passed ?? 0} / {data?.evaluation.total ?? 0} scenarios</span></PanelHeading>
+          <div className="evaluation-grid">
+            <div><strong>{data?.evaluation.falsePositives ?? "—"}</strong><span>false alerts</span></div>
+            <div><strong>{data ? `${Math.round(data.evaluation.recall * 100)}%` : "—"}</strong><span>alert recall</span></div>
+            <div><strong>{data ? `${data.evaluation.coldScore} → ${data.evaluation.learnedScore}` : "—"}</strong><span>late-resident adaptation</span></div>
+            <div><strong>{data ? `−${data.evaluation.riskReduction}` : "—"}</strong><span>risk points after feedback</span></div>
+          </div>
+          <p><b>Reproducible, deterministic test—not a real-world accuracy claim.</b> {data?.evaluation.limitations ?? "Evaluation data unavailable."}</p>
         </section>
         <section className={`status-hero ${riskTone}`}><div className="hero-copy"><div className="status-kicker"><span><Shield size={18}/></span> GUARDIAN STATUS</div><h2>{statusTitle}</h2><p>{statusDescription}</p><div className="hero-meta"><span><i/> API v{data?.api.version ?? "0.1.0"}</span><span><i/> {ringAvailable ? `${data?.ring.count} Ring device(s) accessible` : "Ring access unavailable"}</span><span><i/> Last loaded {data ? formatTime(data.generatedAt) : "—"}</span></div></div><div className="risk-ring" style={{ "--score": `${risk * 3.6}deg` } as React.CSSProperties}><div><span>{data ? risk : "—"}</span><small>STORED RISK SCORE</small><em>{!apiAvailable ? "Unknown / stale" : label(data?.risk.level ?? "unknown")}</em></div></div></section>
         <section className="stats-grid"><Metric icon="!" tone="red" name="ACTIVE INCIDENTS" value={data?.stats.active ?? "—"} note={!apiAvailable ? "Unknown / stale" : data?.stats.active ? "Review recommended" : "No active stored incidents"}/><Metric icon="≋" tone="blue" name="RECENT SIGNALS" value={data?.stats.signals ?? "—"} note={apiAvailable ? "Stored activity window" : "Unknown / stale"}/><Metric icon="⌾" tone="green" name="CONNECTED DEVICES" value={ringAvailable ? data?.ring.count ?? 0 : "—"} note={ringAvailable ? "Device API reachable" : "Check token and connection"}/></section>

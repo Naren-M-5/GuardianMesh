@@ -15,6 +15,7 @@ from packages.guardianmesh_core.storage import InvalidIncidentTransition, Store
 from .config import settings
 from packages.guardianmesh_core.demo import run_demo, run_situation_demo
 from packages.guardianmesh_core.explanation import explain_incident as build_explanation
+from packages.guardianmesh_core.evaluation import run_evaluation
 from .ring_client import (
     RingApiError,
     list_device_events,
@@ -46,6 +47,12 @@ def require_local(request: Request) -> None:
 @app.get("/api/v1/health")
 def health() -> dict:
     return {"status": "healthy", "version": "0.1.0"}
+
+
+@app.get("/api/v1/evaluation")
+def evaluation_report(request: Request) -> dict:
+    require_local(request)
+    return run_evaluation()
 
 
 @app.post("/api/v1/demo/{scenario}")

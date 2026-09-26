@@ -16,10 +16,10 @@ const text = (value: unknown, fallback = "Unknown"): string => typeof value === 
 const number = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
 
 export async function GET() {
-  const [healthResult, incidentsResult, eventsResult, devicesResult, syncResult, baselinesResult] = await Promise.allSettled([
+  const [healthResult, incidentsResult, eventsResult, devicesResult, syncResult, baselinesResult, evaluationResult] = await Promise.allSettled([
     apiGet("/api/v1/health"), apiGet("/api/v1/incidents?limit=25"), apiGet("/api/v1/events?limit=25"),
     apiGet("/api/v1/integrations/ring/devices"), apiGet("/api/v1/integrations/ring/sync/status"),
-    apiGet("/api/v1/baselines"),
+    apiGet("/api/v1/baselines"), apiGet("/api/v1/evaluation"),
   ]);
   if (healthResult.status === "rejected") {
     return NextResponse.json({ error: "GuardianMesh API is offline", detail: "Start FastAPI on port 8000 and refresh." }, { status: 503 });
@@ -69,6 +69,9 @@ export async function GET() {
       ? candidate : current,
     undefined,
   );
+  const evaluation = evaluationResult.status === "fulfilled" ? evaluationResult.value : {};
+  const evaluationMetrics = object(evaluation.metrics);
+  const evaluationLearning = object(evaluation.learning);
   const unresolved = incidents.filter((incident) => incident.status !== "resolved");
   const active = incidents.filter((incident) => ["active", "acknowledged"].includes(incident.status));
   const highest = unresolved.reduce<(typeof incidents)[number] | undefined>(
@@ -98,6 +101,17 @@ export async function GET() {
       privacy: text(primaryBaseline.privacy, "Derived from confirmed event metadata."),
     } : { status: "learning", sampleCount: 0, minimumSamples: 3, confidence: 0,
       activeHours: [], medianDurationSeconds: 0, privacy: "Waiting for confirmed benign outcomes." },
+    evaluation: {
+      synthetic: evaluation.synthetic === true,
+      total: number(evaluationMetrics.total), passed: number(evaluationMetrics.passed),
+      falsePositives: number(evaluationMetrics.false_positives),
+      falseNegatives: number(evaluationMetrics.false_negatives),
+      precision: number(evaluationMetrics.precision), recall: number(evaluationMetrics.recall),
+      coldScore: number(evaluationLearning.late_resident_cold_score),
+      learnedScore: number(evaluationLearning.late_resident_learned_score),
+      riskReduction: number(evaluationLearning.risk_reduction),
+      limitations: text(evaluation.limitations, "Synthetic benchmark unavailable."),
+    },
     incidents, events,
     stats: { active: active.length, observed: incidents.length, signals: rawEvents.length },
   });
