@@ -14,6 +14,7 @@ from packages.guardianmesh_core.storage import InvalidIncidentTransition, Store
 
 from .config import settings
 from packages.guardianmesh_core.demo import run_demo, run_situation_demo
+from packages.guardianmesh_core.explanation import explain_incident as build_explanation
 from .ring_client import (
     RingApiError,
     list_device_events,
@@ -243,14 +244,8 @@ def explain_incident(incident_id: str) -> dict:
     incident = store.get_incident(incident_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    risk = incident["risk"]
-    return {
-        "incident_id": incident_id, "risk_score": risk["score"],
-        "summary": incident["title"],
-        "factors": [{"factor": x["code"].lower(), "contribution": round(x["weight"] * x["value"])}
-                    for x in risk["evidence"]],
-        "evidence": incident["evidence_events"],
-    }
+    events = [event.to_dict() for event in store.get_events_by_ids(incident["evidence_events"])]
+    return build_explanation(incident, events)
 
 
 @app.get("/api/v1/policy/{action}")
