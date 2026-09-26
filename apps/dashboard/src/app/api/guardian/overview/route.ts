@@ -48,6 +48,10 @@ export async function GET() {
           assessment_mode: text(object(risk.context).assessment_mode, "cold_start"),
           baseline_sample_count: number(object(risk.context).baseline_sample_count),
           familiarity_adjustment: number(object(risk.context).familiarity_adjustment),
+          expected_sequence_adjustment: number(object(risk.context).expected_sequence_adjustment),
+          event_count: number(object(risk.context).event_count) || 1,
+          sequence: Array.isArray(object(risk.context).sequence)
+            ? object(risk.context).sequence : [],
         },
       },
     };

@@ -16,6 +16,16 @@ unavailable while the local simulation remains usable.
 
 Routine remains score 0 and Delivery remains score 19 for shorter walkthroughs.
 
+## Evolving situation demonstration
+
+Run Evolving Intrusion to create three signals through the normal ingestion
+pipeline. GuardianMesh keeps one incident ID and increases its assessment as
+motion, person presence, prolonged activity, and a rare sequence accumulate.
+The final dashboard card shows three correlated signals and their ordered types.
+
+Run Expected Delivery to show the other direction: doorbell followed by person
+receives an explicit expected-sequence adjustment while retaining the evidence.
+
 Each click creates a new event and incident; existing Ring history is never cleared.
 Repeated demos add records. Resolve prior high-score simulations before repeating
 the walkthrough. The main score is the highest unresolved assessment in the fetched

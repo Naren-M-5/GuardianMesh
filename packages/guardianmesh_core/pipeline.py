@@ -3,6 +3,7 @@ from typing import Any
 from .models import CanonicalEvent
 from .normalizer import normalize_ring, normalize_ring_history
 from .risk import assess
+from .situation import assess_situation
 from .storage import Store
 
 
@@ -22,7 +23,15 @@ class GuardianPipeline:
         persisted, created = self.store.add_event(event)
         if not created:
             return {"accepted": True, "duplicate": True, "event_id": persisted.event_id}
-        risk, incident = assess(persisted, self.store.get_baseline(persisted.space_id))
+        baseline = self.store.get_baseline(persisted.space_id)
+        candidate = None
+        if persisted.source == "ring" and persisted.event_type != "live_view.started":
+            candidate = self.store.find_correlatable_incident(persisted)
+        if candidate:
+            events = self.store.get_events_by_ids(candidate["evidence_events"]) + [persisted]
+            risk, incident = assess_situation(events, baseline, candidate["incident_id"])
+        else:
+            risk, incident = assess(persisted, baseline)
         self.store.add_incident(incident, risk)
         return {
             "accepted": True, "duplicate": False, "event_id": persisted.event_id,

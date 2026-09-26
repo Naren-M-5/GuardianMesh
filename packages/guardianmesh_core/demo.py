@@ -5,6 +5,7 @@ from uuid import uuid4
 from .normalizer import normalize_ring
 from .risk import assess
 from .storage import Store
+from .pipeline import GuardianPipeline
 
 
 def run_demo(store: Store, scenario: str) -> dict:
@@ -36,3 +37,47 @@ def run_demo(store: Store, scenario: str) -> dict:
     store.add_incident(incident, risk)
     return {"scenario": scenario, "simulation": True, "incident_id": incident["incident_id"],
             "risk": risk.to_dict()}
+
+
+def run_situation_demo(pipeline: GuardianPipeline, scenario: str) -> dict:
+    """Create a multi-signal situation through the real ingestion pipeline."""
+    if scenario not in {"evolving_intrusion", "expected_delivery"}:
+        raise ValueError("Unknown situation scenario")
+    group = uuid4().hex
+    intrusion = scenario == "evolving_intrusion"
+    hour = 2 if intrusion else 12
+    types = (
+        ["motion.detected", "person.detected", "motion.detected"]
+        if intrusion else ["doorbell.pressed", "person.detected", "motion.detected"]
+    )
+    stages = []
+    latest = None
+    for index, event_type in enumerate(types):
+        occurred = datetime.now(timezone.utc).replace(
+            hour=hour, minute=index, second=0, microsecond=0
+        ).isoformat()
+        latest = pipeline.ingest_ring({
+            "id": f"situation_{group}_{index}", "simulation": True,
+            "type": event_type, "occurred_at": occurred,
+            "device_id": "situation_demo_device", "space_id": "space_situation_demo",
+            "zone_id": "front_entrance",
+            "classification": {
+                "label": "person" if event_type == "person.detected" else None,
+                "confidence": 0.96 if event_type == "person.detected" else 0,
+            },
+            "attributes": {
+                "duration_seconds": 74 if intrusion and index == 2 else 5,
+                "rare_sequence": intrusion and index == 2,
+                "demo_scenario": scenario,
+            },
+        }, False)
+        stages.append({
+            "step": index + 1, "event_type": event_type,
+            "score": latest["risk"]["score"], "level": latest["risk"]["level"],
+        })
+    assert latest is not None
+    return {
+        "scenario": scenario, "simulation": True,
+        "incident_id": latest["incident_id"], "stages": stages,
+        "risk": latest["risk"],
+    }

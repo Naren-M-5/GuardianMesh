@@ -13,7 +13,7 @@ from packages.guardianmesh_core.signing import SignatureError, verify
 from packages.guardianmesh_core.storage import InvalidIncidentTransition, Store
 
 from .config import settings
-from packages.guardianmesh_core.demo import run_demo
+from packages.guardianmesh_core.demo import run_demo, run_situation_demo
 from .ring_client import (
     RingApiError,
     list_device_events,
@@ -55,6 +55,18 @@ def demo_scenario(scenario: str, request: Request) -> dict:
         raise HTTPException(status_code=403, detail="Local demo only")
     try:
         return run_demo(store, scenario)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/demo/situation/{scenario}")
+def demo_situation(scenario: str, request: Request) -> dict:
+    require_local(request)
+    origin = request.headers.get("origin")
+    if origin and origin not in {"http://localhost:3000", "http://127.0.0.1:3000"}:
+        raise HTTPException(status_code=403, detail="Local demo only")
+    try:
+        return run_situation_demo(pipeline, scenario)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

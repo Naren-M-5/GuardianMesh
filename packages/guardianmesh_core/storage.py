@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from datetime import datetime
 from typing import Any
 
 from .models import CanonicalEvent, RiskAssessment, utc_now
@@ -96,6 +97,44 @@ class Store:
              incident.get("resolution_outcome")),
         )
         self.connection.commit()
+
+    def find_correlatable_incident(
+        self, event: CanonicalEvent, window_seconds: int = 300
+    ) -> dict[str, Any] | None:
+        rows = self.connection.execute(
+            "SELECT * FROM incidents WHERE space_id=? AND status IN ('active','observed') "
+            "ORDER BY updated_at DESC LIMIT 20",
+            (event.space_id,),
+        ).fetchall()
+        event_time = datetime.fromisoformat(event.occurred_at.replace("Z", "+00:00"))
+        for row in rows:
+            incident = self._incident(row)
+            evidence = incident["evidence_events"]
+            if not evidence:
+                continue
+            last = self.connection.execute(
+                "SELECT payload_json FROM events WHERE event_id=?", (evidence[-1],)
+            ).fetchone()
+            if not last:
+                continue
+            payload = json.loads(last["payload_json"])
+            if payload.get("zone_id") != event.zone_id:
+                continue
+            last_time = datetime.fromisoformat(str(payload["occurred_at"]).replace("Z", "+00:00"))
+            delta = (event_time - last_time).total_seconds()
+            if 0 <= delta <= window_seconds:
+                return incident
+        return None
+
+    def get_events_by_ids(self, event_ids: list[str]) -> list[CanonicalEvent]:
+        items: list[CanonicalEvent] = []
+        for event_id in event_ids:
+            row = self.connection.execute(
+                "SELECT payload_json FROM events WHERE event_id=?", (event_id,)
+            ).fetchone()
+            if row:
+                items.append(CanonicalEvent(**json.loads(row["payload_json"])))
+        return items
 
     def list_incidents(self, limit: int = 100) -> list[dict[str, Any]]:
         rows = self.connection.execute(
