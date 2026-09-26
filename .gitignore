@@ -13,3 +13,4 @@ dist/
 .env*.local
 *.db-shm
 *.db-wal
+apps/dashboard/next-env.d.ts
