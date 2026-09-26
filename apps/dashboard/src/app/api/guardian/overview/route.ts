@@ -16,9 +16,10 @@ const text = (value: unknown, fallback = "Unknown"): string => typeof value === 
 const number = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
 
 export async function GET() {
-  const [healthResult, incidentsResult, eventsResult, devicesResult, syncResult] = await Promise.allSettled([
+  const [healthResult, incidentsResult, eventsResult, devicesResult, syncResult, baselinesResult] = await Promise.allSettled([
     apiGet("/api/v1/health"), apiGet("/api/v1/incidents?limit=25"), apiGet("/api/v1/events?limit=25"),
     apiGet("/api/v1/integrations/ring/devices"), apiGet("/api/v1/integrations/ring/sync/status"),
+    apiGet("/api/v1/baselines"),
   ]);
   if (healthResult.status === "rejected") {
     return NextResponse.json({ error: "GuardianMesh API is offline", detail: "Start FastAPI on port 8000 and refresh." }, { status: 503 });
@@ -41,7 +42,14 @@ export async function GET() {
       title: text(item.title, "Observed activity"), severity: text(item.severity, "normal"),
       status: text(item.status, "observed"), startedAt: text(item.started_at, new Date().toISOString()),
       resolution: typeof item.resolution === "string" ? item.resolution : null,
-      risk: { score: number(risk.score), level: text(risk.level, "normal"), evidence },
+      risk: {
+        score: number(risk.score), level: text(risk.level, "normal"), evidence,
+        context: {
+          assessment_mode: text(object(risk.context).assessment_mode, "cold_start"),
+          baseline_sample_count: number(object(risk.context).baseline_sample_count),
+          familiarity_adjustment: number(object(risk.context).familiarity_adjustment),
+        },
+      },
     };
   });
   const events = rawEvents.slice(0, 8).map((item) => ({
@@ -51,6 +59,12 @@ export async function GET() {
   // Deliberately discard raw Ring IDs and relationships before responding to the browser.
   const deviceNames = rawDevices.map((item) => text(object(item.attributes).name, "Ring device")).slice(0, 3);
   const sync = syncResult.status === "fulfilled" ? syncResult.value : {};
+  const rawBaselines = baselinesResult.status === "fulfilled" ? list(baselinesResult.value.items) : [];
+  const primaryBaseline = rawBaselines.reduce<JsonRecord | undefined>(
+    (current, candidate) => !current || number(candidate.sample_count) > number(current.sample_count)
+      ? candidate : current,
+    undefined,
+  );
   const unresolved = incidents.filter((incident) => incident.status !== "resolved");
   const active = incidents.filter((incident) => ["active", "acknowledged"].includes(incident.status));
   const highest = unresolved.reduce<(typeof incidents)[number] | undefined>(
@@ -69,6 +83,17 @@ export async function GET() {
       },
     },
     risk: highest?.risk ?? { score: 0, level: "normal", evidence: [] }, primaryIncident: highest ?? null,
+    baseline: primaryBaseline ? {
+      status: text(primaryBaseline.status, "learning"),
+      sampleCount: number(primaryBaseline.sample_count),
+      minimumSamples: number(primaryBaseline.minimum_samples),
+      confidence: number(primaryBaseline.confidence),
+      activeHours: Array.isArray(primaryBaseline.active_hours)
+        ? primaryBaseline.active_hours.filter((value): value is number => typeof value === "number") : [],
+      medianDurationSeconds: number(primaryBaseline.median_duration_seconds),
+      privacy: text(primaryBaseline.privacy, "Derived from confirmed event metadata."),
+    } : { status: "learning", sampleCount: 0, minimumSamples: 3, confidence: 0,
+      activeHours: [], medianDurationSeconds: 0, privacy: "Waiting for confirmed benign outcomes." },
     incidents, events,
     stats: { active: active.length, observed: incidents.length, signals: rawEvents.length },
   });

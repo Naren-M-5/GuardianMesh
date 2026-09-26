@@ -11,13 +11,18 @@ Base path: `/api/v1`.
 | GET | `/integrations/ring/sync/status` | Last Ring synchronization result |
 | GET | `/events` | Canonical event list |
 | GET | `/incidents` | Incident list |
+| GET | `/baselines` | Privacy-preserving learned routine summaries |
 | GET | `/incidents/{id}` | Incident detail |
 | GET | `/incidents/{id}/explanation` | Numeric evidence explanation |
 | POST | `/incidents/{id}/acknowledge` | Record owner acknowledgement |
-| POST | `/incidents/{id}/resolve` | Resolve with a required note |
+| POST | `/incidents/{id}/resolve` | Resolve with a required note and structured outcome |
 | GET | `/incidents/{id}/audit` | Incident action audit history |
 | GET | `/policy/{action}` | Inspect deterministic action decision |
 
-Planned: SSE stream, routine profiles, privacy preferences, daily summary, and evidence-grounded Guardian queries.
+Resolution outcomes are `resident`, `expected_visitor`, `delivery`,
+`harmless_activity`, `suspicious_activity`, and `unknown`. Only the first four
+train the adaptive baseline.
+
+Planned: SSE stream, privacy preferences, daily summary, and evidence-grounded Guardian queries.
 
 The webhook returns `202` and does not run an LLM. Production processing will publish asynchronously after persistence.

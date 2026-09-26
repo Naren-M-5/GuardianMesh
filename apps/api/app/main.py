@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -26,6 +27,10 @@ pipeline = GuardianPipeline(store)
 
 class ResolveIncidentRequest(BaseModel):
     resolution: str = Field(min_length=3, max_length=500)
+    outcome: Literal[
+        "resident", "expected_visitor", "delivery", "harmless_activity",
+        "suspicious_activity", "unknown",
+    ] = "unknown"
 
 
 def require_local(request: Request) -> None:
@@ -163,6 +168,12 @@ def list_incidents(limit: int = Query(100, ge=1, le=500)) -> dict:
     return {"items": store.list_incidents(limit)}
 
 
+@app.get("/api/v1/baselines")
+def list_household_baselines() -> dict:
+    """Profiles contain confirmed metadata patterns, never media or identities."""
+    return {"items": store.list_baselines()}
+
+
 @app.get("/api/v1/incidents/{incident_id}")
 def get_incident(incident_id: str) -> dict:
     incident = store.get_incident(incident_id)
@@ -196,6 +207,7 @@ def resolve_incident(
             "resolved",
             actor="local_home_owner",
             resolution=payload.resolution,
+            resolution_outcome=payload.outcome,
         )
     except InvalidIncidentTransition as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

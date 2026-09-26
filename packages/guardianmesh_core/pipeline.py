@@ -22,7 +22,7 @@ class GuardianPipeline:
         persisted, created = self.store.add_event(event)
         if not created:
             return {"accepted": True, "duplicate": True, "event_id": persisted.event_id}
-        risk, incident = assess(persisted)
+        risk, incident = assess(persisted, self.store.get_baseline(persisted.space_id))
         self.store.add_incident(incident, risk)
         return {
             "accepted": True, "duplicate": False, "event_id": persisted.event_id,

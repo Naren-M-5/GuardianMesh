@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import CanonicalEvent, RiskAssessment, utc_now
+from .baseline import BENIGN_OUTCOMES, RESOLUTION_OUTCOMES, build_baseline
 
 
 class InvalidIncidentTransition(ValueError):
@@ -46,6 +47,9 @@ class Store:
           integration TEXT PRIMARY KEY, state_json TEXT NOT NULL, updated_at TEXT NOT NULL
         );
         """)
+        columns = {row["name"] for row in self.connection.execute("PRAGMA table_info(incidents)")}
+        if "resolution_outcome" not in columns:
+            self.connection.execute("ALTER TABLE incidents ADD COLUMN resolution_outcome TEXT")
         self.connection.commit()
 
     def add_event(self, event: CanonicalEvent) -> tuple[CanonicalEvent, bool]:
@@ -81,11 +85,15 @@ class Store:
 
     def add_incident(self, incident: dict[str, Any], risk: RiskAssessment) -> None:
         self.connection.execute(
-            "INSERT OR REPLACE INTO incidents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO incidents "
+            "(incident_id, space_id, type, status, severity, title, started_at, updated_at, "
+            "risk_json, evidence_json, resolution, resolution_outcome) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (incident["incident_id"], incident["space_id"], incident["type"], incident["status"],
              incident["severity"], incident["title"], incident["started_at"],
              incident["updated_at"], json.dumps(risk.to_dict()),
-             json.dumps(incident["evidence_events"]), incident.get("resolution")),
+             json.dumps(incident["evidence_events"]), incident.get("resolution"),
+             incident.get("resolution_outcome")),
         )
         self.connection.commit()
 
@@ -107,6 +115,7 @@ class Store:
         target_status: str,
         actor: str,
         resolution: str | None = None,
+        resolution_outcome: str | None = None,
     ) -> dict[str, Any] | None:
         incident = self.get_incident(incident_id)
         if not incident:
@@ -127,17 +136,23 @@ class Store:
         clean_resolution = resolution.strip() if resolution else None
         if target_status == "resolved" and not clean_resolution:
             raise InvalidIncidentTransition("A resolution note is required.")
+        clean_outcome = resolution_outcome or "unknown"
+        if target_status == "resolved" and clean_outcome not in RESOLUTION_OUTCOMES:
+            raise InvalidIncidentTransition("Unsupported resolution outcome.")
 
         occurred_at = utc_now()
         details = {
             "from_status": current_status,
             "to_status": target_status,
             "resolution": clean_resolution,
+            "resolution_outcome": clean_outcome if target_status == "resolved" else None,
         }
         with self.connection:
             self.connection.execute(
-                "UPDATE incidents SET status=?, updated_at=?, resolution=? WHERE incident_id=?",
-                (target_status, occurred_at, clean_resolution, incident_id),
+                "UPDATE incidents SET status=?, updated_at=?, resolution=?, resolution_outcome=? "
+                "WHERE incident_id=?",
+                (target_status, occurred_at, clean_resolution,
+                 clean_outcome if target_status == "resolved" else None, incident_id),
             )
             self.connection.execute(
                 "INSERT INTO audit_logs (occurred_at, actor, action, object_id, details_json) "
@@ -151,6 +166,30 @@ class Store:
                 ),
             )
         return self.get_incident(incident_id)
+
+    def list_baseline_events(self, space_id: str) -> list[dict[str, Any]]:
+        placeholders = ",".join("?" for _ in BENIGN_OUTCOMES)
+        rows = self.connection.execute(
+            f"SELECT evidence_json FROM incidents WHERE space_id=? AND status='resolved' "
+            f"AND resolution_outcome IN ({placeholders})",
+            (space_id, *sorted(BENIGN_OUTCOMES)),
+        ).fetchall()
+        event_ids = {event_id for row in rows for event_id in json.loads(row["evidence_json"])}
+        if not event_ids:
+            return []
+        event_placeholders = ",".join("?" for _ in event_ids)
+        event_rows = self.connection.execute(
+            f"SELECT payload_json FROM events WHERE event_id IN ({event_placeholders})",
+            tuple(event_ids),
+        ).fetchall()
+        return [json.loads(row["payload_json"]) for row in event_rows]
+
+    def get_baseline(self, space_id: str) -> dict[str, Any]:
+        return build_baseline(space_id, self.list_baseline_events(space_id))
+
+    def list_baselines(self) -> list[dict[str, Any]]:
+        rows = self.connection.execute("SELECT DISTINCT space_id FROM events ORDER BY space_id").fetchall()
+        return [self.get_baseline(str(row["space_id"])) for row in rows]
 
     def list_incident_audit(self, incident_id: str, limit: int = 50) -> list[dict[str, Any]]:
         rows = self.connection.execute(

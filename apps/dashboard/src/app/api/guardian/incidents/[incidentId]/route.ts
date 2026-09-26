@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 const API_BASE = (process.env.GUARDIANMESH_API_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 
-type ActionBody = { action?: unknown; resolution?: unknown };
+type ActionBody = { action?: unknown; resolution?: unknown; outcome?: unknown };
+const outcomes = new Set(["resident", "expected_visitor", "delivery", "harmless_activity", "suspicious_activity", "unknown"]);
 
 export async function POST(
   request: Request,
@@ -17,6 +18,9 @@ export async function POST(
   if (body.action === "resolve" && (typeof body.resolution !== "string" || body.resolution.trim().length < 3)) {
     return NextResponse.json({ error: "Enter a resolution note of at least 3 characters" }, { status: 400 });
   }
+  if (body.action === "resolve" && (typeof body.outcome !== "string" || !outcomes.has(body.outcome))) {
+    return NextResponse.json({ error: "Choose what the activity turned out to be" }, { status: 400 });
+  }
 
   try {
     const response = await fetch(
@@ -24,7 +28,8 @@ export async function POST(
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: body.action === "resolve" ? JSON.stringify({ resolution: body.resolution }) : undefined,
+        body: body.action === "resolve"
+          ? JSON.stringify({ resolution: body.resolution, outcome: body.outcome }) : undefined,
         cache: "no-store",
         signal: AbortSignal.timeout(10000),
       },
@@ -37,6 +42,7 @@ export async function POST(
       status: result.status,
       title: result.title,
       resolution: result.resolution ?? null,
+      resolutionOutcome: result.resolution_outcome ?? null,
       updatedAt: result.updated_at,
     });
   } catch {

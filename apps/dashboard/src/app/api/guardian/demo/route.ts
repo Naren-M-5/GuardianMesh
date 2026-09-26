@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   let body;
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "Invalid request" }, { status: 400 }); }
-  if (!body || !["intrusion", "delivery", "routine"].includes(body.scenario)) {
+  if (!body || !["intrusion", "late_resident", "delivery", "routine"].includes(body.scenario)) {
     return NextResponse.json({ error: "Unknown scenario" }, { status: 400 });
   }
   const base = (process.env.GUARDIANMESH_API_URL ?? "http://127.0.0.1:8000").replace(/\/$/, "");

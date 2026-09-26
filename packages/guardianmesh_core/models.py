@@ -52,6 +52,7 @@ class RiskAssessment:
     level: str
     evidence: list[RiskFactor]
     model_confidence: float
+    context: dict[str, Any] = field(default_factory=dict)
     risk_assessment_id: str = field(default_factory=lambda: new_id("risk"))
     created_at: str = field(default_factory=utc_now)
 
